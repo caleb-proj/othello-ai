@@ -4,11 +4,18 @@
 #include <vector>
 #include <algorithm>
 #include <cstdlib>
+#include <ctime>
+
+#include "masks.h"
 
 #define EPSILON 0.0000001
 #define EXPLORATION sqrt(2)
 #define DARK_INIT 0x0000000810000000
 #define LIGHT_INIT 0x0000001008000000
+
+/*
+
+*/
 
 enum class Player {
     dark = 0,
@@ -27,15 +34,13 @@ public:
     BitBoard(uint64_t board) : board(board) {}
     
     void debug_print() {
-        for (int i = 0; i < 64; ++i) {
-            if (i % 8 == 0) {
-                std::cout << std::endl;
+        for (int i = 7; i >= 0; --i) {
+            for (int j = 0; j < 8; ++j) {
+                std::cout << (((board >> (8*i+j))) & 1);
             }
 
-            std::cout << ((board >> i) & 1);
+            std::cout << std::endl;
         }
-
-        std::cout << std::endl;
     } 
 
     bool is_empty() {
@@ -59,6 +64,12 @@ public:
         return index;
     }
 
+    int peel_bit_back() {
+        int index = 63 - __builtin_clzll(board);
+        board &= ~((uint64_t) 1 << index);
+        return index;
+    }
+
     BitBoard operator|(BitBoard other) {
         return BitBoard(board | other.board);
     }
@@ -73,6 +84,10 @@ public:
 
     BitBoard operator&(uint64_t bits) {
         return BitBoard(board & bits);
+    }
+
+    BitBoard operator^(BitBoard other) {
+        return BitBoard(board ^ other.board);
     }
 
     void operator&=(BitBoard other) {
@@ -103,11 +118,11 @@ public:
         return BitBoard(~board);
     }
 
-    BitBoard operator==(BitBoard other) {
+    bool operator==(BitBoard other) {
         return board == other.board;
     }
 
-    BitBoard operator==(uint64_t bits) {
+    bool operator==(uint64_t bits) {
         return bits == board;
     }
 };
@@ -122,26 +137,29 @@ public:
         flood |= gen = (gen SHIFT) & pro; \
         flood |= gen = (gen SHIFT) & pro; \
         flood |= gen = (gen SHIFT) & pro; \
-        flood |= gen = (gen SHIFT) & pro; \
         flood |=       (gen SHIFT) & pro; \
         return flood; \
     } \
+    BitBoard NAME##_flood(BitBoard gen, BitBoard pro) { \
+        return (NAME##_fill(gen, pro) SHIFT) & MASK; \
+    } \
     BitBoard NAME##_moves(BitBoard gen, BitBoard pro) { \
         BitBoard flood = NAME##_fill(gen, pro); \
-        return ((flood & pro) SHIFT); \
+        return ((flood & pro & MASK) SHIFT); \
     }
 
-FILL_FUNCTION(north, >> 8, 0xffffffffffffffff)
-FILL_FUNCTION(south, << 8, 0xffffffffffffffff)
-FILL_FUNCTION(west, << 1, 0xfefefefefefefefe)
-FILL_FUNCTION(southwest, << 9, 0xfefefefefefefefe)
-FILL_FUNCTION(northwest, >> 7, 0xfefefefefefefefe)
-FILL_FUNCTION(east, >> 1, 0x7f7f7f7f7f7f7f7f)
-FILL_FUNCTION(northeast, >> 9, 0x7f7f7f7f7f7f7f7f)
-FILL_FUNCTION(southeast, << 7, 0x7f7f7f7f7f7f7f7f)
-
+FILL_FUNCTION(north, << 8, (uint64_t) 0xffffffffffffffff)
+FILL_FUNCTION(south, >> 8, (uint64_t) 0xffffffffffffffff)
+FILL_FUNCTION(west, >> 1, (uint64_t) 0x7f7f7f7f7f7f7f7f)
+FILL_FUNCTION(southwest, >> 9, (uint64_t) 0x7f7f7f7f7f7f7f7f)
+FILL_FUNCTION(northwest, << 7, (uint64_t) 0x7f7f7f7f7f7f7f7f)
+FILL_FUNCTION(east, << 1, (uint64_t) 0xfefefefefefefefe)
+FILL_FUNCTION(northeast, << 9, (uint64_t) 0xfefefefefefefefe)
+FILL_FUNCTION(southeast, >> 7, (uint64_t) 0xfefefefefefefefe)
+   
 class Board {
-private:
+public:
+// private:
     BitBoard bits[2];
 
     BitBoard& disks(Player player) {
@@ -170,32 +188,53 @@ private:
     }
 
     Board place_disk(Player player, int index) {
-        Board board;
-        BitBoard placed = BitBoard(1 << index);
+        std::cout << static_cast<int>(player) << std::endl;
+        Board board = *this;
+        BitBoard placed = BitBoard((uint64_t) 1 << index);
         BitBoard flipping = disks(opponent(player));
 
         BitBoard flipped;
-        flipped |= north_fill(placed, flipping);
-        flipped |= south_fill(placed, flipping);
-        flipped |= east_fill(placed, flipping);
-        flipped |= northeast_fill(placed, flipping);
-        flipped |= southeast_fill(placed, flipping);
-        flipped |= west_fill(placed, flipping);
-        flipped |= northwest_fill(placed, flipping);
-        flipped |= southwest_fill(placed, flipping);
+        // flipped |= north_flood(placed, flipping);
+        // flipped |= south_flood(placed, flipping);
+        // flipped |= east_flood(placed, flipping);
+        // flipped |= northeast_flood(placed, flipping);
+        // flipped |= southeast_flood(placed, flipping);
+        // flipped |= west_flood(placed, flipping);
+        // flipped |= northwest_flood(placed, flipping);
+        // flipped |= southwest_flood(placed, flipping);
+        // flipped = multidirectional_flood(disks(player), disks(opponent(player)), index);
+        flipped.debug_print();
         
-        board.disks(player) |= flipped;
-        board.disks(opponent(player)) = flipped;
+        std::cout << index << std::endl; 
+        board.disks(player) |= (flipped | placed);
+        board.disks(opponent(player)) &= ~(flipped);
         return board; 
     }
 
     Board(BitBoard dark, BitBoard light) : bits{dark, light} {}
-public:
+// public:
     Board() : bits{0, 0} {}
 
     // Temporary
     static Board opening_position() {
         return Board(BitBoard(DARK_INIT), BitBoard(LIGHT_INIT));
+    }
+
+    void debug_print() {
+        for (int i = 7; i >= 0; --i) {
+            for (int j = 0; j < 8; ++j) {
+                int idx = i*8 + j;   
+                if (((disks(Player::dark) >> idx) & 1) == 1) {
+                    std::cout << "D";
+                } else if (((disks(Player::light) >> idx) & 1) == 1) {
+                    std::cout << "L";
+                } else {
+                    std::cout << "_";
+                }
+            }
+            
+            std::cout << std::endl;    
+        }
     }
 
     int score(Player player) {     
@@ -213,17 +252,30 @@ public:
         while (!bits.is_empty()) {
             Board board = *this;
             int index = bits.peel_bit();
-            board.place_disk(player, index);
+            board = board.place_disk(player, index);
             moves.push_back(board);
         }
+
+        std::cout << "Exiting find_moves" << std::endl;
 
         return moves;
     }
 };
 
-Player playout(Board board, Player player) {
+Player playout(Board start, Player player) {
+    std::cout << "Board: " << std::endl;
+    start.debug_print();
+
+    Player turn = player;
+    Board board = start;
     for (;;) {
-        std::vector<Board> moves = board.find_moves(player);
+        std::vector<Board> moves = board.find_moves(turn);
+        std::cout << "Got " << moves.size() << " moves." << std::endl;
+        for (Board move : moves) {
+            move.debug_print();
+            std::cout << std::endl;
+        }
+
         if (moves.empty()) {
             if (board.is_winner(Player::light)) {
                 return Player::light;
@@ -234,8 +286,10 @@ Player playout(Board board, Player player) {
             }
         }
 
+        std::cout << "Chosen move:" << std::endl;
         board = moves[rand() % moves.size()];
-        player = opponent(player);
+        board.debug_print();
+        turn = opponent(turn);
     }
 }
 
@@ -274,6 +328,8 @@ private:
     void expand() {
         std::vector<Board> moves = board.find_moves(player);
         for (Board move : moves) {
+            move.debug_print();
+            std::cout << std::endl;
             children.push_back(Node(move, opponent(player)));
         }
     }
@@ -288,7 +344,6 @@ public:
         int win;
         if (is_leaf()) {
             expand();
-            std::cout << "We've gotten this far." << std::endl;
             Node& node = select();
             win = node.playout() == player;
             node.wins += 1 - win;
@@ -305,9 +360,24 @@ public:
 };
 
 int main(void) {
-    Node top = Node(Board::opening_position(), Player::dark);
-    for (int i = 0; i < 1; ++i) {
-        top.mcts();
+    srand(time(NULL));
+    
+    /*    
+    BitBoard pro(((uint64_t) 1 << 1) | (((uint64_t) 1 << 2)) | (((uint64_t) 1 << 3)));
+    BitBoard disks((uint64_t) 1 << 0);
+    BitBoard move((uint64_t) 1 << 4);
+    BitBoard flood = west_fill(move, pro);
+    flood.debug_print();
+
+    int i = flood.peel_bit();
+    if (((disks >> (i-1)) & 1) == 1) {
+        std::cout << "Did we do it?" << std::endl;
+    }
+    */
+    
+    for (int i = 0; i < sizeof(test) / sizeof(uint64_t); ++i) {
+        BitBoard(test[i]).debug_print();
+        std::cout << std::endl;
     }
 
     return 0;
