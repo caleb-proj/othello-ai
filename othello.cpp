@@ -548,8 +548,7 @@ int main(void) {
         
         for (int i = 0; i < 15000; ++i) { 
             iter->mcts();
-        }
-        
+        } 
         iter = &iter->best_move();
     }
     
