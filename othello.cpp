@@ -139,12 +139,10 @@ public:
     BitBoard NAME##_fill(BitBoard gen, BitBoard pro) { \
         BitBoard flood = gen; \
         pro &= MASK; \
-        flood |= gen = (gen SHIFT) & pro; \
-        flood |= gen = (gen SHIFT) & pro; \
-        flood |= gen = (gen SHIFT) & pro; \
-        flood |= gen = (gen SHIFT) & pro; \
-        flood |= gen = (gen SHIFT) & pro; \
-        flood |=       (gen SHIFT) & pro; \
+        while (!gen.is_empty()) { \
+            flood |= gen; \
+            gen = (gen SHIFT) & pro; \
+        } \
         return flood; \
     } \
     BitBoard NAME##_flood(BitBoard gen, BitBoard pro) { \
@@ -152,7 +150,7 @@ public:
     } \
     BitBoard NAME##_moves(BitBoard gen, BitBoard pro) { \
         BitBoard flood = NAME##_fill(gen, pro); \
-        return ((flood & pro) SHIFT) & MASK & ~(gen | pro); \
+        return ((flood & pro) SHIFT) & MASK; \
     }
 
 FILL_FUNCTION(north, << 8, (uint64_t) 0xffffffffffffffff)
@@ -165,8 +163,8 @@ FILL_FUNCTION(northeast, << 9, (uint64_t) EAST_MASK)
 FILL_FUNCTION(southeast, >> 7, (uint64_t) EAST_MASK)
    
 class Board {
-public:
 // private:
+public:
     BitBoard bits[2];
 
     BitBoard& disks(Player player) {
@@ -174,7 +172,7 @@ public:
     }
 
     BitBoard occupied() {
-        return disks(Player::light) | disks(Player::light);
+        return disks(Player::dark) | disks(Player::light);
     }
 
     BitBoard move_bits(Player player) {
@@ -246,15 +244,13 @@ public:
         gen = placed;
         flood = gen;
         i = index;
-        bool unmasked;
 
         do {
             flood |= gen = (gen << 9) & pro;
-            i += 9;
-            unmasked = ((flood & ~EAST_MASK) == 0);
+            i += 9; 
         } while (!gen.is_empty());
 
-        if (unmasked & ((own >> i) & 1) == 1) {
+        if (((own >> i) & 1) == 1) {
             flipped |= flood;
         }
 
@@ -264,7 +260,7 @@ public:
 
         do {
             flood |= gen = (gen >> 7) & pro;
-            i -= 7;
+            i -= 7; 
         } while (!gen.is_empty());
 
         if (((own >> i) & 1) == 1) {
@@ -278,7 +274,7 @@ public:
 
         do {
             flood |= gen = (gen >> 1) & pro;
-            i -= 1;
+            i -= 1; 
         } while (!gen.is_empty());
 
         if (((own >> i) & 1) == 1) {
@@ -291,7 +287,7 @@ public:
 
         do {
             flood |= gen = (gen << 7) & pro;
-            i += 7;
+            i += 7; 
         } while (!gen.is_empty());
 
         if (((own >> i) & 1) == 1) {
@@ -304,16 +300,15 @@ public:
 
         do {
             flood |= gen = (gen >> 9) & pro;
-            i -= 9;
+            i -= 9; 
         } while (!gen.is_empty());
 
         if (((own >> i) & 1) == 1) {
             flipped |= flood;
         }
-
-        
+ 
         board.disks(player) |= flipped;
-        board.disks(opponent(player)) &= ~(flipped);
+        board.disks(opponent(player)) &= ~flipped;
         return board; 
     }
 
@@ -518,7 +513,7 @@ public:
             next.wins += 1 - win;
             next.simulations += 1;
         } else {
-            win = next.mcts();
+            win = 1 - next.mcts();
         }
 
         wins += win;
@@ -545,31 +540,27 @@ public:
 int main(void) {
     srand(time(NULL));
     
-    /*    
-    BitBoard pro(((uint64_t) 1 << 1) | (((uint64_t) 1 << 2)) | (((uint64_t) 1 << 3)));
-    BitBoard disks((uint64_t) 1 << 0);
-    BitBoard move((uint64_t) 1 << 4);
-    BitBoard flood = west_fill(move, pro);
-    flood.debug_print();
-
-    int i = flood.peel_bit();
-    if (((disks >> (i-1)) & 1) == 1) {
-        std::cout << "Did we do it?" << std::endl;
-    }
-    */
-    
     Player turn = Player::dark; 
     Board board = Board::opening_position();
-    for (unsigned int i = 0; i < 30; ++i) {
-        board.display();
+    while (!board.find_moves(turn).empty()) {
         Node node(board, turn);
         
         for (int i = 0; i < 15000; ++i) { 
             node.mcts();
         }
 
+        board.move_bits(turn).debug_print();
         turn = opponent(turn);
         board = node.best_move();
+        board.display();
+    }
+
+    if (board.is_winner(Player::dark)) {
+        std::cout << "Dark wins" << std::endl;
+    } else if (board.is_winner(Player::light)) {
+        std::cout << "Light wins" << std::endl;
+    } else {
+        std::cout << "Draw" << std::endl;
     }
 
     return 0;
