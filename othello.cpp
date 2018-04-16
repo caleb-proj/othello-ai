@@ -13,6 +13,9 @@
 #define DARK_INIT 0x0000000810000000
 #define LIGHT_INIT 0x0000001008000000
 
+#define EAST_MASK 0xfefefefefefefefe
+#define WEST_MASK 0x7f7f7f7f7f7f7f7f
+
 /*
 
 */
@@ -125,6 +128,10 @@ public:
     bool operator==(uint64_t bits) {
         return bits == board;
     }
+
+    bool operator!=(uint64_t bits) {
+        return bits != board;
+    }
 };
 
 // hacky, but efficient
@@ -150,12 +157,12 @@ public:
 
 FILL_FUNCTION(north, << 8, (uint64_t) 0xffffffffffffffff)
 FILL_FUNCTION(south, >> 8, (uint64_t) 0xffffffffffffffff)
-FILL_FUNCTION(west, >> 1, (uint64_t) 0x7f7f7f7f7f7f7f7f)
-FILL_FUNCTION(southwest, >> 9, (uint64_t) 0x7f7f7f7f7f7f7f7f)
-FILL_FUNCTION(northwest, << 7, (uint64_t) 0x7f7f7f7f7f7f7f7f)
-FILL_FUNCTION(east, << 1, (uint64_t) 0xfefefefefefefefe)
-FILL_FUNCTION(northeast, << 9, (uint64_t) 0xfefefefefefefefe)
-FILL_FUNCTION(southeast, >> 7, (uint64_t) 0xfefefefefefefefe)
+FILL_FUNCTION(west, >> 1, (uint64_t) WEST_MASK)
+FILL_FUNCTION(southwest, >> 9, (uint64_t) WEST_MASK)
+FILL_FUNCTION(northwest, << 7, (uint64_t) WEST_MASK)
+FILL_FUNCTION(east, << 1, (uint64_t) EAST_MASK)
+FILL_FUNCTION(northeast, << 9, (uint64_t) EAST_MASK)
+FILL_FUNCTION(southeast, >> 7, (uint64_t) EAST_MASK)
    
 class Board {
 public:
@@ -191,22 +198,124 @@ public:
         std::cout << static_cast<int>(player) << std::endl;
         Board board = *this;
         BitBoard placed = BitBoard((uint64_t) 1 << index);
+        BitBoard own = disks(player);
         BitBoard flipping = disks(opponent(player));
 
         BitBoard flipped;
-        // flipped |= north_flood(placed, flipping);
-        // flipped |= south_flood(placed, flipping);
-        // flipped |= east_flood(placed, flipping);
-        // flipped |= northeast_flood(placed, flipping);
-        // flipped |= southeast_flood(placed, flipping);
-        // flipped |= west_flood(placed, flipping);
-        // flipped |= northwest_flood(placed, flipping);
-        // flipped |= southwest_flood(placed, flipping);
-        // flipped = multidirectional_flood(disks(player), disks(opponent(player)), index);
-        flipped.debug_print();
+    
+        BitBoard gen = placed;
+        BitBoard flood = gen;
+        BitBoard pro = flipping;
+        int i = index;
+
+        do {
+            flood |= gen = (gen >> 8) & pro;
+            i -= 8;
+        } while (!gen.is_empty());
+       
+        if (((own >> i) & 1) == 1) {
+            flipped |= flood;
+        }
+
+        gen = placed;
+        flood = gen;
+        i = index;
+
+        do {
+            flood |= gen = (gen << 8) & pro;
+            i += 8;
+        } while (!gen.is_empty());
+
+        if (((own >> i) & 1) == 1) {
+            flipped |= flood;
+        }
+
+        gen = placed;
+        flood = gen;
+        pro = flipping & EAST_MASK;
+        i = index;
+
+        do {
+            flood |= gen = (gen << 1) & pro;
+            i += 1;
+        } while (!gen.is_empty());
+   
+        if (((own >> i) & 1) == 1) {
+            flipped |= flood;
+        }
+
+        gen = placed;
+        flood = gen;
+        i = index;
+
+        do {
+            flood |= gen = (gen << 9) & pro;
+            i += 9;
+        } while (!gen.is_empty());
+
+        if (((own >> i) & 1) == 1) {
+            flipped |= flood;
+        }
+
+        gen = placed;
+        flood = gen;
+        i = index;
+
+        do {
+            flood |= gen = (gen >> 7) & pro;
+            i -= 7;
+        } while (!gen.is_empty());
+
+        if (((own >> i) & 1) == 1) {
+            flipped |= flood;
+        }
+
+        gen = placed;
+        flood = gen;
+        pro = flipping & WEST_MASK;
+        i = index;
+
+        do {
+            flood |= gen = (gen >> 1) & pro;
+            i -= 1;
+            if (gen != 0 && gen != ((uint64_t) 1 << i)) {
+                std::cout << "FUCK" << std::endl;
+            }
+        } while (!gen.is_empty());
+
+        if (((own >> i) & 1) == 1) {
+            std::cout << "TRUE" << std::endl;
+            flipped |= flood;
+        }
+
+        gen = placed;
+        flood = gen;
+        i = index;
+
+        do {
+            flood |= gen = (gen << 7) & pro;
+            i += 7;
+        } while (!gen.is_empty());
+
+        if (((own >> i) & 1) == 1) {
+            flipped |= flood;
+        }
+
+        gen = placed;
+        flood = gen;
+        i = index;
+
+        do {
+            flood |= gen = (gen >> 9) & pro;
+            i -= 9;
+        } while (!gen.is_empty());
+
+        if (((own >> i) & 1) == 1) {
+            flipped |= flood;
+        }
+
         
-        std::cout << index << std::endl; 
-        board.disks(player) |= (flipped | placed);
+        board.disks(player) |= flipped;
         board.disks(opponent(player)) &= ~(flipped);
         return board; 
     }
@@ -218,6 +327,53 @@ public:
     // Temporary
     static Board opening_position() {
         return Board(BitBoard(DARK_INIT), BitBoard(LIGHT_INIT));
+    }
+
+    void display() {
+        BitBoard dark = disks(Player::dark);
+        BitBoard light = disks(Player::light);
+
+        std::cout << "\033[42m";
+        std::cout << "\033[97m";
+
+        std::cout << "┌──┬──┬──┬──┬──┬──┬──┬──┐";
+        std::cout << "\033[49m";
+        std::cout << std::endl;
+        std::cout << "\033[42m";
+
+        for (int i = 7; i >= 0; --i) {
+            for (int j = 0; j < 8; ++j) {
+                std::cout << "\033[97m";
+                std::cout << "│";
+                int idx = i*8 + j;
+                if (((dark >> idx) & 1) == 1) {
+                    std::cout << "\033[30m";
+                    std::cout << "⬤ ";
+                } else if (((light >> idx) & 1) == 1) {
+                    std::cout << "\033[97m";
+                    std::cout << "⬤ ";
+                } else {
+                    std::cout << "  ";
+                }
+            }
+
+            std::cout << "│";
+            std::cout << "\033[49m";
+            std::cout << std::endl;
+            std::cout << "\033[42m";
+            if (i != 0) {  
+                std::cout << "├──┼──┼──┼──┼──┼──┼──┼──┤";
+                std::cout << "\033[49m";
+                std::cout << std::endl;
+                std::cout << "\033[42m";
+            }
+        }
+        
+        std::cout << "└──┴──┴──┴──┴──┴──┴──┴──┘";
+
+        std::cout << "\033[39m";
+        std::cout << "\033[49m";
+        std::cout << std::endl;
     }
 
     void debug_print() {
@@ -264,7 +420,7 @@ public:
 
 Player playout(Board start, Player player) {
     std::cout << "Board: " << std::endl;
-    start.debug_print();
+    start.display();
 
     Player turn = player;
     Board board = start;
@@ -374,11 +530,9 @@ int main(void) {
         std::cout << "Did we do it?" << std::endl;
     }
     */
-    
-    for (int i = 0; i < sizeof(test) / sizeof(uint64_t); ++i) {
-        BitBoard(test[i]).debug_print();
-        std::cout << std::endl;
-    }
+
+    Node node(Board::opening_position(), Player::dark);
+    node.mcts();
 
     return 0;
 }
