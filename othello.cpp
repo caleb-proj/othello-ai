@@ -2,7 +2,7 @@
 #include <cmath>
 #include <cstdint>
 #include <vector>
-#include <algorithm>
+#include <random>
 #include <cstdlib>
 #include <ctime>
 
@@ -15,10 +15,6 @@
 
 #define EAST_MASK 0xfefefefefefefefe
 #define WEST_MASK 0x7f7f7f7f7f7f7f7f
-
-/*
-
-*/
 
 enum class Player {
     dark = 0,
@@ -237,34 +233,29 @@ public:
 
         gen = placed;
         flood = gen;
-        int i = index;
 
         do {
             flood |= gen = (gen << 9) & pro;
-            i += 9; 
         } while (!gen.is_empty());
 
-        if (((own >> i) & 1) == 1) {
+        if ((((flood << 9) & EAST_MASK) & own) != 0) {
             flipped |= flood;
         }
 
         gen = placed;
         flood = gen;
-        i = index;
 
         do {
             flood |= gen = (gen >> 7) & pro;
-            i -= 7; 
         } while (!gen.is_empty());
 
-        if (((own >> i) & 1) == 1) {
+        if ((((flood >> 7) & EAST_MASK) & own) != 0) {
             flipped |= flood;
         }
 
         gen = placed;
         flood = gen;
         pro = flipping & WEST_MASK;
-        i = index;
 
         do {
             flood |= gen = (gen >> 1) & pro;
@@ -276,27 +267,23 @@ public:
 
         gen = placed;
         flood = gen;
-        i = index;
 
         do {
             flood |= gen = (gen << 7) & pro;
-            i += 7; 
         } while (!gen.is_empty());
 
-        if (((own >> i) & 1) == 1) {
+        if ((((flood << 7) & WEST_MASK) & own) != 0) {
             flipped |= flood;
         }
 
         gen = placed;
         flood = gen;
-        i = index;
 
         do {
             flood |= gen = (gen >> 9) & pro;
-            i -= 9; 
         } while (!gen.is_empty());
 
-        if (((own >> i) & 1) == 1) {
+        if ((((flood >> 9) & WEST_MASK) & own) != 0) {
             flipped |= flood;
         }
  
@@ -404,6 +391,8 @@ public:
     }
 };
 
+std::random_device seeder;
+std::mt19937_64 engine(seeder());
 Player playout(Board start, Player player) {
     Player turn = player;
     Board board = start;
@@ -416,11 +405,13 @@ Player playout(Board start, Player player) {
             } else if (board.is_winner(Player::dark)) {
                 return Player::dark;
             } else {
-                return static_cast<Player>(rand() % 2);
+                std::uniform_int_distribution<int> dist(0, 1);
+                return static_cast<Player>(dist(engine));
             }
         }
-            
-        board = moves[rand() % moves.size()];
+        
+        std::uniform_int_distribution<int> dist(0, moves.size() - 1); 
+        board = moves[dist(engine)];
         turn = opponent(turn);
     }
 }
@@ -534,8 +525,16 @@ public:
         return board;
     }
 
+    Player get_turn() {
+        return turn;
+    }
+
     bool is_terminal() {
         return terminal_position;
+    }
+
+    double confidence() {
+        return (double) wins / simulations;
     }
 };
 
@@ -544,15 +543,24 @@ int main(void) {
     
     Node* iter = new Node(Board::opening_position(), Player::dark);
     while (!iter->is_terminal()) {
+        if (iter->get_turn() == Player::dark) {
+            std::cout << "Dark ";
+        } else {
+            std::cout << "Light ";
+        }
+
+        std::cout << "confidence: " << iter->confidence() << std::endl;
         iter->get_board().display();
         
-        for (int i = 0; i < 15000; ++i) { 
+        for (int i = 0; i < 50000; ++i) { 
             iter->mcts();
         } 
+        
         iter = &iter->best_move();
     }
     
     Board board = iter->get_board();
+    board.display();
     if (board.is_winner(Player::dark)) {
         std::cout << "Dark wins" << std::endl;
     } else if (board.is_winner(Player::light)) {
