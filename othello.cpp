@@ -152,7 +152,7 @@ public:
     } \
     BitBoard NAME##_moves(BitBoard gen, BitBoard pro) { \
         BitBoard flood = NAME##_fill(gen, pro); \
-        return ((flood & pro & MASK) SHIFT); \
+        return ((flood & pro) SHIFT) & MASK & ~(gen | pro); \
     }
 
 FILL_FUNCTION(north, << 8, (uint64_t) 0xffffffffffffffff)
@@ -195,7 +195,6 @@ public:
     }
 
     Board place_disk(Player player, int index) {
-        std::cout << static_cast<int>(player) << std::endl;
         Board board = *this;
         BitBoard placed = BitBoard((uint64_t) 1 << index);
         BitBoard own = disks(player);
@@ -247,13 +246,15 @@ public:
         gen = placed;
         flood = gen;
         i = index;
+        bool unmasked;
 
         do {
             flood |= gen = (gen << 9) & pro;
             i += 9;
+            unmasked = ((flood & ~EAST_MASK) == 0);
         } while (!gen.is_empty());
 
-        if (((own >> i) & 1) == 1) {
+        if (unmasked & ((own >> i) & 1) == 1) {
             flipped |= flood;
         }
 
@@ -278,13 +279,9 @@ public:
         do {
             flood |= gen = (gen >> 1) & pro;
             i -= 1;
-            if (gen != 0 && gen != ((uint64_t) 1 << i)) {
-                std::cout << "FUCK" << std::endl;
-            }
         } while (!gen.is_empty());
 
         if (((own >> i) & 1) == 1) {
-            std::cout << "TRUE" << std::endl;
             flipped |= flood;
         }
 
@@ -334,7 +331,7 @@ public:
         BitBoard light = disks(Player::light);
 
         std::cout << "\033[42m";
-        std::cout << "\033[97m";
+        std::cout << "\033[30m";
 
         std::cout << "┌──┬──┬──┬──┬──┬──┬──┬──┐";
         std::cout << "\033[49m";
@@ -344,6 +341,7 @@ public:
         for (int i = 7; i >= 0; --i) {
             for (int j = 0; j < 8; ++j) {
                 std::cout << "\033[97m";
+                std::cout << "\033[30m";
                 std::cout << "│";
                 int idx = i*8 + j;
                 if (((dark >> idx) & 1) == 1) {
@@ -356,7 +354,8 @@ public:
                     std::cout << "  ";
                 }
             }
-
+            
+            std::cout << "\033[30m";
             std::cout << "│";
             std::cout << "\033[49m";
             std::cout << std::endl;
@@ -369,6 +368,7 @@ public:
             }
         }
         
+        std::cout << "\033[30m"; 
         std::cout << "└──┴──┴──┴──┴──┴──┴──┴──┘";
 
         std::cout << "\033[39m";
@@ -412,25 +412,15 @@ public:
             moves.push_back(board);
         }
 
-        std::cout << "Exiting find_moves" << std::endl;
-
         return moves;
     }
 };
 
 Player playout(Board start, Player player) {
-    std::cout << "Board: " << std::endl;
-    start.display();
-
     Player turn = player;
     Board board = start;
     for (;;) {
         std::vector<Board> moves = board.find_moves(turn);
-        std::cout << "Got " << moves.size() << " moves." << std::endl;
-        for (Board move : moves) {
-            move.debug_print();
-            std::cout << std::endl;
-        }
 
         if (moves.empty()) {
             if (board.is_winner(Player::light)) {
@@ -441,10 +431,8 @@ Player playout(Board start, Player player) {
                 return static_cast<Player>(rand() % 2);
             }
         }
-
-        std::cout << "Chosen move:" << std::endl;
+            
         board = moves[rand() % moves.size()];
-        board.debug_print();
         turn = opponent(turn);
     }
 }
@@ -452,18 +440,19 @@ Player playout(Board start, Player player) {
 class Node {
 private:
     Board board;
-    Player player;
+    Player turn;
     int wins;
     int simulations;
     std::vector<Node> children;
+    bool terminal_position;
 
     bool is_leaf() {
         return children.empty();
     }
 
-    double utc_value() {
-        double mean = wins / (simulations + EPSILON);
-        return mean + EXPLORATION * sqrt(log(simulations + 1) / (simulations + EPSILON));
+    double utc_value(Node& node) {
+        double mean = node.wins / (node.simulations + EPSILON);
+        return mean + EXPLORATION * sqrt(log(simulations + 1) / (node.simulations + EPSILON));
     }
 
     Node& select() {
@@ -471,7 +460,7 @@ private:
         double max_value = -1;
 
         for (unsigned int i = 0; i < children.size(); ++i) {
-            double value = children[i].utc_value();
+            double value = utc_value(children[i]);
             if (max_value < value) {
                 max_value = value;
                 max_index = i;
@@ -482,36 +471,74 @@ private:
     }
 
     void expand() {
-        std::vector<Board> moves = board.find_moves(player);
-        for (Board move : moves) {
-            move.debug_print();
-            std::cout << std::endl;
-            children.push_back(Node(move, opponent(player)));
+        std::vector<Board> moves = board.find_moves(turn);
+        if (moves.empty()) {
+            terminal_position = true;
+        } else {
+            for (Board move : moves) {
+                children.emplace_back(Node(move, opponent(turn)));
+            }
         }
     }
 
     Player playout() {
-        return ::playout(board, player);
+        return ::playout(board, turn);
     }
 public:
-    Node(Board board, Player player) : board(board), player(player), wins(0), simulations(0), children() {}
+    Node(Board board, Player turn) : board(board), turn(turn), wins(0), simulations(0), children(), terminal_position(false) {}
 
     int mcts() {
-        int win;
         if (is_leaf()) {
             expand();
-            Node& node = select();
-            win = node.playout() == player;
-            node.wins += 1 - win;
-            node.simulations += 1;
+        }
+
+        if (terminal_position) {
+            int win;
+            if (board.is_winner(Player::dark)) {
+                win = Player::dark == turn;
+            } else if (board.is_winner(Player::light)) {
+                win = Player::light == turn;
+            } else {
+                if (rand() % 2 == 0)
+                    win = 1;
+                else
+                    win = 0;
+            }
+
+            simulations += 1;
+            wins += win;
+            return win;
+        }
+        
+        Node& next = select();
+
+        int win;
+        if (next.simulations == 0) {
+            win = next.playout() == turn;
+            next.wins += 1 - win;
+            next.simulations += 1;
         } else {
-            Node& next = select();
             win = next.mcts();
         }
- 
+
         wins += win;
         simulations += 1;
         return win;
+    }
+
+    Board best_move() {
+        int max_index = -1;
+        int max_simulations = -1;
+        for (unsigned int i = 0; i < children.size(); ++i) {
+            std::cout << "Move " << i << ": " << children[i].wins << "/" << children[i].simulations << std::endl;
+
+            if (children[i].simulations > max_simulations) {
+                max_simulations = children[i].simulations;
+                max_index = i;
+            }
+        }
+
+        return children[max_index].board;
     }
 };
 
@@ -530,9 +557,20 @@ int main(void) {
         std::cout << "Did we do it?" << std::endl;
     }
     */
+    
+    Player turn = Player::dark; 
+    Board board = Board::opening_position();
+    for (unsigned int i = 0; i < 30; ++i) {
+        board.display();
+        Node node(board, turn);
+        
+        for (int i = 0; i < 15000; ++i) { 
+            node.mcts();
+        }
 
-    Node node(Board::opening_position(), Player::dark);
-    node.mcts();
+        turn = opponent(turn);
+        board = node.best_move();
+    }
 
     return 0;
 }
