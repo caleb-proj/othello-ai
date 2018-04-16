@@ -139,12 +139,10 @@ public:
     BitBoard NAME##_fill(BitBoard gen, BitBoard pro) { \
         BitBoard flood = gen; \
         pro &= MASK; \
-        flood |= gen = (gen SHIFT) & pro; \
-        flood |= gen = (gen SHIFT) & pro; \
-        flood |= gen = (gen SHIFT) & pro; \
-        flood |= gen = (gen SHIFT) & pro; \
-        flood |= gen = (gen SHIFT) & pro; \
-        flood |=       (gen SHIFT) & pro; \
+        while (!gen.is_empty()) { \
+            flood |= gen; \
+            gen = (gen SHIFT) & pro; \
+        } \
         return flood; \
     } \
     BitBoard NAME##_flood(BitBoard gen, BitBoard pro) { \
@@ -152,7 +150,7 @@ public:
     } \
     BitBoard NAME##_moves(BitBoard gen, BitBoard pro) { \
         BitBoard flood = NAME##_fill(gen, pro); \
-        return ((flood & pro) SHIFT) & MASK & ~(gen | pro); \
+        return ((flood & pro) SHIFT) & MASK; \
     }
 
 FILL_FUNCTION(north, << 8, (uint64_t) 0xffffffffffffffff)
@@ -165,8 +163,8 @@ FILL_FUNCTION(northeast, << 9, (uint64_t) EAST_MASK)
 FILL_FUNCTION(southeast, >> 7, (uint64_t) EAST_MASK)
    
 class Board {
-public:
 // private:
+public:
     BitBoard bits[2];
 
     BitBoard& disks(Player player) {
@@ -174,7 +172,7 @@ public:
     }
 
     BitBoard occupied() {
-        return disks(Player::light) | disks(Player::light);
+        return disks(Player::dark) | disks(Player::light);
     }
 
     BitBoard move_bits(Player player) {
@@ -205,56 +203,48 @@ public:
         BitBoard gen = placed;
         BitBoard flood = gen;
         BitBoard pro = flipping;
-        int i = index;
 
         do {
             flood |= gen = (gen >> 8) & pro;
-            i -= 8;
         } while (!gen.is_empty());
        
-        if (((own >> i) & 1) == 1) {
+        if (((flood >> 8) & own) != 0) {
             flipped |= flood;
         }
 
         gen = placed;
         flood = gen;
-        i = index;
 
         do {
             flood |= gen = (gen << 8) & pro;
-            i += 8;
         } while (!gen.is_empty());
 
-        if (((own >> i) & 1) == 1) {
+        if (((flood << 8) & own) != 0) {
             flipped |= flood;
         }
 
         gen = placed;
         flood = gen;
         pro = flipping & EAST_MASK;
-        i = index;
 
         do {
             flood |= gen = (gen << 1) & pro;
-            i += 1;
         } while (!gen.is_empty());
    
-        if (((own >> i) & 1) == 1) {
+        if ((((flood << 1) & EAST_MASK) & own) != 0) {
             flipped |= flood;
         }
 
         gen = placed;
         flood = gen;
-        i = index;
-        bool unmasked;
+        int i = index;
 
         do {
             flood |= gen = (gen << 9) & pro;
-            i += 9;
-            unmasked = ((flood & ~EAST_MASK) == 0);
+            i += 9; 
         } while (!gen.is_empty());
 
-        if (unmasked & ((own >> i) & 1) == 1) {
+        if (((own >> i) & 1) == 1) {
             flipped |= flood;
         }
 
@@ -264,7 +254,7 @@ public:
 
         do {
             flood |= gen = (gen >> 7) & pro;
-            i -= 7;
+            i -= 7; 
         } while (!gen.is_empty());
 
         if (((own >> i) & 1) == 1) {
@@ -278,10 +268,9 @@ public:
 
         do {
             flood |= gen = (gen >> 1) & pro;
-            i -= 1;
         } while (!gen.is_empty());
 
-        if (((own >> i) & 1) == 1) {
+        if ((((flood >> 1) & WEST_MASK) & own) != 0) {
             flipped |= flood;
         }
 
@@ -291,7 +280,7 @@ public:
 
         do {
             flood |= gen = (gen << 7) & pro;
-            i += 7;
+            i += 7; 
         } while (!gen.is_empty());
 
         if (((own >> i) & 1) == 1) {
@@ -304,16 +293,15 @@ public:
 
         do {
             flood |= gen = (gen >> 9) & pro;
-            i -= 9;
+            i -= 9; 
         } while (!gen.is_empty());
 
         if (((own >> i) & 1) == 1) {
             flipped |= flood;
         }
-
-        
+ 
         board.disks(player) |= flipped;
-        board.disks(opponent(player)) &= ~(flipped);
+        board.disks(opponent(player)) &= ~flipped;
         return board; 
     }
 
@@ -466,7 +454,7 @@ private:
                 max_index = i;
             }
         }
-
+        
         return children[max_index];
     }
 
@@ -499,7 +487,8 @@ public:
             } else if (board.is_winner(Player::light)) {
                 win = Player::light == turn;
             } else {
-                if (rand() % 2 == 0)
+                int half = RAND_MAX / 2;
+                if (rand() % 2 <= half)
                     win = 1;
                 else
                     win = 0;
@@ -518,7 +507,7 @@ public:
             next.wins += 1 - win;
             next.simulations += 1;
         } else {
-            win = next.mcts();
+            win = 1 - next.mcts();
         }
 
         wins += win;
@@ -526,8 +515,8 @@ public:
         return win;
     }
 
-    Board best_move() {
-        int max_index = -1;
+    Node& best_move() {
+        unsigned int max_index = -1;
         int max_simulations = -1;
         for (unsigned int i = 0; i < children.size(); ++i) {
             std::cout << "Move " << i << ": " << children[i].wins << "/" << children[i].simulations << std::endl;
@@ -538,38 +527,39 @@ public:
             }
         }
 
-        return children[max_index].board;
+        return children[max_index];
+    }
+
+    Board get_board() {
+        return board;
+    }
+
+    bool is_terminal() {
+        return terminal_position;
     }
 };
 
 int main(void) {
     srand(time(NULL));
     
-    /*    
-    BitBoard pro(((uint64_t) 1 << 1) | (((uint64_t) 1 << 2)) | (((uint64_t) 1 << 3)));
-    BitBoard disks((uint64_t) 1 << 0);
-    BitBoard move((uint64_t) 1 << 4);
-    BitBoard flood = west_fill(move, pro);
-    flood.debug_print();
-
-    int i = flood.peel_bit();
-    if (((disks >> (i-1)) & 1) == 1) {
-        std::cout << "Did we do it?" << std::endl;
-    }
-    */
-    
-    Player turn = Player::dark; 
-    Board board = Board::opening_position();
-    for (unsigned int i = 0; i < 30; ++i) {
-        board.display();
-        Node node(board, turn);
+    Node* iter = new Node(Board::opening_position(), Player::dark);
+    while (!iter->is_terminal()) {
+        iter->get_board().display();
         
         for (int i = 0; i < 15000; ++i) { 
-            node.mcts();
+            iter->mcts();
         }
-
-        turn = opponent(turn);
-        board = node.best_move();
+        
+        iter = &iter->best_move();
+    }
+    
+    Board board = iter->get_board();
+    if (board.is_winner(Player::dark)) {
+        std::cout << "Dark wins" << std::endl;
+    } else if (board.is_winner(Player::light)) {
+        std::cout << "Light wins" << std::endl;
+    } else {
+        std::cout << "Draw" << std::endl;
     }
 
     return 0;
