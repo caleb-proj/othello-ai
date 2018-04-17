@@ -9,9 +9,9 @@
 #include "masks.h"
 
 #define EPSILON 0.0000001
-#define EXPLORATION sqrt(2)
-#define DARK_INIT 0x0000000810000000
-#define LIGHT_INIT 0x0000001008000000
+#define EXPLORATION 1.5
+#define DARK_INIT 0x0000001008000000
+#define LIGHT_INIT 0x0000000810000000
 
 #define EAST_MASK 0xfefefefefefefefe
 #define WEST_MASK 0x7f7f7f7f7f7f7f7f
@@ -389,6 +389,14 @@ public:
 
         return moves;
     }
+
+    Board place_disk(Player player, int x, int y) {
+        return place_disk(player, (y-1)*8 + (x-1));
+    }
+
+    bool operator==(Board other) {
+        return bits == other.bits;
+    }
 };
 
 std::random_device seeder;
@@ -430,7 +438,7 @@ private:
     }
 
     double utc_value(Node& node) {
-        double mean = node.wins / (node.simulations + EPSILON);
+        double mean = (double) (node.simulations -node.wins) / (node.simulations + EPSILON);
         return mean + EXPLORATION * sqrt(log(simulations + 1) / (node.simulations + EPSILON));
     }
 
@@ -510,10 +518,9 @@ public:
         unsigned int max_index = -1;
         int max_simulations = -1;
         for (unsigned int i = 0; i < children.size(); ++i) {
-            std::cout << "Move " << i << ": " << children[i].wins << "/" << children[i].simulations << std::endl;
-
-            if (children[i].simulations > max_simulations) {
-                max_simulations = children[i].simulations;
+            int simulations = children[i].simulations;
+            if (simulations > max_simulations) {
+                max_simulations = simulations;
                 max_index = i;
             }
         }
@@ -536,30 +543,57 @@ public:
     double confidence() {
         return (double) wins / simulations;
     }
+
+    Node& choose_move(Board move) {
+        for (Node& child : children) {
+            if (child.board == move) {
+                return child;
+            }
+        }
+    
+        std::cout << "Error: move not detected";
+        return children[0];
+    }
 };
 
 int main(void) {
     srand(time(NULL));
     
-    Node* iter = new Node(Board::opening_position(), Player::dark);
-    while (!iter->is_terminal()) {
-        if (iter->get_turn() == Player::dark) {
-            std::cout << "Dark ";
-        } else {
-            std::cout << "Light ";
+    Board board = Board::opening_position();
+    for (;;) {
+        Node node(board, Player::dark);
+        for (int i = 0; i < 250000; ++i) {
+            node.mcts();
+        }
+        
+        std::cout << "Confidence: " << node.confidence() << std::endl;
+        board = node.best_move().get_board();
+        board.display();
+
+        if (board.find_moves(Player::light).empty()) {
+            break;
         }
 
-        std::cout << "confidence: " << iter->confidence() << std::endl;
-        iter->get_board().display();
-        
-        for (int i = 0; i < 50000; ++i) { 
-            iter->mcts();
-        } 
-        
-        iter = &iter->best_move();
+        /*int x, y;
+        std::cin >> x;
+        std::cin >> y;
+        board = board.place_disk(Player::light, x, y)
+        board.display */
+        //std::vector<Board> moves = board.find_moves(Player::light);
+        //board = moves[rand() % moves.size()];
+        Node node2(board, Player::light);
+        for (int i = 0; i < 250000; ++i) {
+            node2.mcts();
+        }
+
+        board = node2.best_move().get_board();
+        board.display();
+
+        if (board.find_moves(Player::dark).empty()) {
+            break;
+        }
     }
     
-    Board board = iter->get_board();
     board.display();
     if (board.is_winner(Player::dark)) {
         std::cout << "Dark wins" << std::endl;
